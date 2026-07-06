@@ -1,0 +1,76 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Functions ────────────────────────────────────────────────────────
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == 'matirrajjo@gmail.com';
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidProductData() {
+      return request.resource.data.keys().hasAll(['name', 'description', 'price', 'imageUrl', 'category', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.description is string
+        && request.resource.data.price is number
+        && request.resource.data.price >= 0
+        && request.resource.data.imageUrl is string
+        && request.resource.data.category is string;
+    }
+
+    // ─── Products ─────────────────────────────────────────────────────────
+    match /products/{productId} {
+      // Anyone can read products
+      allow read: if true;
+      // Only admin can create/update/delete with data validation
+      allow create: if isAdmin() && isValidProductData();
+      allow update: if isAdmin() && request.resource.data.name is string;
+      allow delete: if isAdmin();
+    }
+
+    // ─── Users ────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Users can read/write only their own profile
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId)
+        && request.resource.data.keys().hasOnly(['displayName', 'phone', 'address', 'photoURL', 'updatedAt']);
+      allow delete: if false; // Never allow deletion of user profiles
+    }
+
+    // ─── Orders ───────────────────────────────────────────────────────────
+    match /orders/{orderId} {
+      allow create: if isAuthenticated()
+        && request.resource.data.keys().hasAll(['userId', 'items', 'totalAmount', 'status'])
+        && request.resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAdmin()
+        && request.resource.data.keys().hasAny(['status', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // ─── Contacts ─────────────────────────────────────────────────────────
+    match /contacts/{contactId} {
+      // Anyone can submit a contact message (rate-limited client-side)
+      allow create: if true
+        && request.resource.data.keys().hasAll(['name', 'phone', 'message', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.phone is string
+        && request.resource.data.message is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.message.size() >= 10;
+      // Only admin can read/delete
+      allow read: if isAdmin();
+      allow delete: if isAdmin();
+      allow update: if false;
+    }
+  }
+}
